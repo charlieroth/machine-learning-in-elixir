@@ -16,6 +16,12 @@ Flower Classification problem from Chapter 1 of "Machine Learning in Elixir"
 
 ### Links
 
+[Axon Documentation](https://hexdocs.pm/axon/Axon.html)
+
+[Nx Documentation](https://hexdocs.pm/nx/Nx.html)
+
+[Explorer Documentation](https://hexdocs.pm/explorer/Explorer.html)
+
 [Variance - Wikipedia](https://en.wikipedia.org/wiki/Variance)
 
 ```elixir
@@ -43,7 +49,7 @@ Now let's standardize the `iris` dataset
 normalized_iris =
   DF.mutate(
     iris,
-    for col <- across(~w(sepal_width sepal_length petal_length petal_width)) do
+    for col <- across(["sepal_width", "sepal_length", "petal_length", "petal_width"]) do
       {col.name, (col - mean(col)) / variance(col)}
     end
   )
@@ -91,7 +97,12 @@ The `DataFrame` that represents our `iris` dataset has both *categorical* featur
 Now performing *one-hot encoding* for our dataset
 
 ```elixir
-feature_columns = ["sepal_length", "sepal_width", "petal_length", "petal_width"]
+feature_columns = [
+  "sepal_length",
+  "sepal_width",
+  "petal_length",
+  "petal_width"
+]
 ```
 
 ```elixir
@@ -99,11 +110,15 @@ label_column = "species"
 ```
 
 ```elixir
-x_train = Nx.stack(train_df[feature_columns], axis: 1)
+x_train =
+  train_df[feature_columns]
+  |> Nx.stack(axis: 1)
 ```
 
 ```elixir
-train_categories = train_df["species"] |> Series.cast(:category)
+train_categories =
+  train_df["species"]
+  |> Series.cast(:category)
 ```
 
 To *one-hot encode* our categorical dataset you can use `Series.cast/2`, providing `:category` as the `dtype`. Below is a simplified example
@@ -125,15 +140,22 @@ y_train =
 ```
 
 ```elixir
-x_test = Nx.stack(test_df[feature_columns], axis: 1)
+x_test =
+  test_df[feature_columns]
+  |> Nx.stack(axis: 1)
 ```
 
 ```elixir
-test_categories = test_df["species"] |> Series.cast(:category)
+test_categories =
+  test_df["species"]
+  |> Series.cast(:category)
 ```
 
 ```elixir
-y_test = test_categories |> Nx.stack(axis: -1) |> Nx.equal(Nx.iota({1, 3}, axis: -1))
+y_test =
+  test_categories
+  |> Nx.stack(axis: -1)
+  |> Nx.equal(Nx.iota({1, 3}, axis: -1))
 ```
 
 ## Training The Model
@@ -161,7 +183,8 @@ model =
 You can visualize your model with `Kino` and `Axon.Display.as_graph/2`
 
 ```elixir
-Axon.Display.as_graph(model, Nx.template({1, 4}, :f32))
+model
+|> Axon.Display.as_graph(Nx.template({1, 4}, :f32))
 ```
 
 ### Create an Input Pipeline
@@ -171,7 +194,7 @@ Axon implements minibatch training with *gradient descent*. This means that Axon
 The `iris` dataset is small but `Axon` still requires a data structure that allows it to grab data for multiple steps over a given training run. This is done with the `Stream` module.
 
 ```elixir
-data_stream =
+input_train =
   Stream.repeatedly(fn ->
     {x_train, y_train}
   end)
@@ -196,7 +219,7 @@ trained_model_state =
   model
   |> Axon.Loop.trainer(:categorical_cross_entropy, :sgd)
   |> Axon.Loop.metric(:accuracy)
-  |> Axon.Loop.run(data_stream, %{}, iterations: 500, epochs: 10)
+  |> Axon.Loop.run(input_train, %{}, iterations: 500, epochs: 50)
 ```
 
 ### Evaluating the Trained Model
