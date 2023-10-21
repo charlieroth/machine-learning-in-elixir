@@ -1,0 +1,275 @@
+# Working With Nx
+
+```elixir
+Mix.install([
+  {:nx, "~> 0.6.2"},
+  {:exla, "~> 0.6.1"},
+  {:benchee, github: "bencheeorg/benchee", override: true}
+])
+```
+
+## Thinking In Tensors
+
+#### Understanding `Nx` Tensors
+
+Tensors have the following properties:
+
+* _Numeric type_
+* Shape
+* Data
+
+`Nx` numeric types dicate how the underlying tensor data is interpreted during the execution and inspection
+
+The number of dimensions in a tensor is referred to as a tensor's _rank_. A tensor's shape helps map tensors to and from the real world. Futhermore, a tensor's shape tells you how to perform cetrain operations on the tensor. To more naturally map a tensor's shape to the real world, `Nx` implements _named tensors_, which introduce dimension or axis names for more idiomatic tensor manipulation
+
+The tensor data is not represented as an Elixir list, but instead as raw bytes or a binary. A binary is an array of character bytes. These bytes are interpreted as a nested list of values based on the tensor's shape and type
+
+```elixir
+# Tensor with a type of 64-bit signed integer
+Nx.tensor([1, 2, 3])
+```
+
+```elixir
+# Tensor with a type of 32-bit float
+Nx.tensor([1.0, 2.0, 3.0])
+```
+
+```elixir
+# Tensor with a type of 64-bit float
+Nx.tensor(1.0e-45, type: {:f, 64})
+```
+
+```elixir
+# Tensor with a shape {1, 2}
+Nx.tensor([1, 2])
+```
+
+```elixir
+# Tensor with a shape {2, 2}
+Nx.tensor([[1, 2], [3, 4]])
+```
+
+```elixir
+# Tensor with a shape {2, 2, 2}
+Nx.tensor([
+  [
+    [1, 2],
+    [3, 4]
+  ],
+  [
+    [5, 6],
+    [7, 8]
+  ]
+])
+```
+
+```elixir
+Nx.tensor([[1, 2, 3], [4, 5, 6]], names: [:x, :y])
+```
+
+```elixir
+Nx.tensor([[1, 2, 3], [4, 5, 6]]) |> Nx.to_binary()
+```
+
+```elixir
+<<1::64-signed-native, 2::64-signed-native, 3::64-signed-native>>
+|> Nx.from_binary({:s, 64})
+```
+
+## Nx Operations
+
+Nx comes with a number of operations that can be composed into complex mathemtical operations and algorithms
+
+The four common types of operations to become familiar with are:
+
+* Shape and type operations
+* Element-wise unary operations
+* Element-wise binary operations
+* Reductions
+
+<!-- livebook:{"break_markdown":true} -->
+
+#### Shape and Type Operations
+
+Shape and type operations work on the shape and type properties of a tensor
+
+```elixir
+a = Nx.tensor([1, 2, 3])
+```
+
+```elixir
+a
+|> Nx.as_type({:f, 32})
+|> Nx.reshape({1, 3, 1})
+```
+
+#### Element-wise Unary Operations
+
+Element-wise unary operations are similar to calling `Enum.map/2` on a list of data with mathematical operations
+
+```elixir
+a = Nx.tensor([[[-1, -2, -3], [-4, -5, -6]], [[1, 2, 3], [4, 5, 6]]])
+```
+
+```elixir
+Nx.abs(a)
+```
+
+#### Element-wise Binary Operations
+
+You will want to add, subtract, multiply and divide your data. `Nx` provides functions to performs such operations regardless of the complexity of your data (as long as it makes mathematical sense)
+
+```elixir
+a = Nx.tensor([[1, 2, 3], [4, 5, 6]])
+b = Nx.tensor([[4, 5, 6], [7, 8, 9]])
+```
+
+```elixir
+Nx.add(a, b)
+```
+
+```elixir
+Nx.multiply(a, b)
+```
+
+When applying a binary operation on two tensors that are not the same shape `Nx` will attempt to _broadcast_ your tensors together
+
+_Broadcasting_ is the process of repeating an operation over the dimensions of two tensors to make their shapes compatible
+
+Two tensors can be broadcasted together only when the following conditions are met:
+
+1. One of the shapes is scalar
+2. Corresponding dimensions have the same size OR one of the dimensions is size `1`
+
+```elixir
+Nx.add(5, Nx.tensor([1, 2, 3]))
+```
+
+```elixir
+Nx.add(Nx.tensor([1, 2, 3]), Nx.tensor([[4, 5, 6], [7, 8, 9]]))
+```
+
+#### Reductions
+
+`Nx` offers a number of out-of-the-box reductions that allow you to compute aggregates over entire tensors or over specifc axes
+
+<!-- livebook:{"break_markdown":true} -->
+
+Revenues over the last 12 months and a reduction to calculate the total revenue across all 12 months
+
+```elixir
+revs = Nx.tensor([85, 76, 42, 34, 46, 23, 52, 99, 22, 32, 85, 51])
+```
+
+```elixir
+Nx.sum(revs)
+```
+
+Revenues from the last four years
+
+```elixir
+revs =
+  Nx.tensor(
+    [
+      [85, 76, 42, 34, 46, 23, 52, 99, 22, 32, 85, 51],
+      [45, 76, 21, 34, 78, 54, 56, 89, 98, 23, 32, 56],
+      [84, 37, 59, 98, 87, 76, 65, 54, 32, 12, 23, 34],
+      [12, 23, 34, 45, 98, 76, 87, 91, 82, 83, 74, 65]
+    ],
+    names: [:year, :month]
+  )
+```
+
+Compute total revenue per year or monthly by specifying an axis to sum over
+
+```elixir
+Nx.sum(revs, axes: [:year])
+```
+
+```elixir
+Nx.sum(revs, axes: [:month])
+```
+
+## Going From def to defn
+
+By adding `import Nx.Defn` the definitions for _Nx numerical definitions_
+
+A numerical definition is an Elixir function that will be _just-in-time (JIT) compiled_ using a valid Nx compiler. The function compiled is dependent on the type and shape of the inputs to your function. The `defn` creates a numerical definition that can be JIT-compiled to the CPU or GPU
+
+Different compiler backends, such as EXLA or PyTorch, know how to take advantage of these numerical definitions and run them in the fastest way possible. This allows your `Nx` code to benefit from advances in numerical compiler technology while your code remains the same!
+
+```elixir
+defmodule MyModule do
+  import Nx.Defn
+
+  defn(adds_one(x), do: Nx.add(x, 1))
+  defn(adds_one_and_prints(x), do: Nx.add(x, 1) |> print_expr())
+end
+```
+
+```elixir
+MyModule.adds_one(Nx.tensor([1, 2, 3]))
+```
+
+```elixir
+MyModule.adds_one_and_prints(Nx.tensor([1, 2, 3]))
+```
+
+To see the performance benefits of using an `Nx` compiler the _softmax_ function can be implemented with and without the use of the `Nx` compiler for comparison
+
+```elixir
+defmodule Softmax do
+  import Nx.Defn
+
+  defn softmax(n) do
+    Nx.exp(n) / Nx.sum(Nx.exp(n))
+  end
+end
+```
+
+```elixir
+key = Nx.Random.key(42)
+{tensor, _key} = Nx.Random.uniform(key, shape: {1_000_000})
+```
+
+After running the benchmark below you will see that using the EXLA JIT-compiler, there is a massive difference in performance compared to unoptimized Elixir
+
+```elixir
+Benchee.run(
+  %{
+    "JIT with EXLA" => fn ->
+      apply(EXLA.jit(&Softmax.softmax/1), [tensor])
+    end,
+    "Regular Elixir" => fn ->
+      Softmax.softmax(tensor)
+    end
+  },
+  time: 10
+)
+```
+
+After enabled the global compiler option of `EXLA` for `Nx` the differenc in performance is essentially the same
+
+```elixir
+Nx.Defn.global_default_options(compiler: EXLA)
+```
+
+```elixir
+Benchee.run(
+  %{
+    "JIT with EXLA" => fn ->
+      apply(EXLA.jit(&Softmax.softmax/1), [tensor])
+    end,
+    "Regular Elixir" => fn ->
+      Softmax.softmax(tensor)
+    end
+  },
+  time: 10
+)
+```
+
+#### Backend or Compiler?
+
+There are two fundamental ways of speeding up your code: backends and compilers
+
+`Nx` backends are implementations of the `Nx` which eagerly evaluate `Nx` functions. The default one being `Nx.BinaryBackend` which is implemented in pure Elixir
