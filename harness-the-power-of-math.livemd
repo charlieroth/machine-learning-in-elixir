@@ -1,0 +1,124 @@
+<!-- livebook:{"file_entries":[{"name":"IMG_0061.jpeg","type":"attachment"}]} -->
+
+# Harness the Power of Math
+
+```elixir
+Mix.install([
+  {:nx, "~> 0.6.2"},
+  {:exla, "~> 0.6.1"},
+  {:kino, "~> 0.11.0"},
+  {:stb_image, "~> 0.6.3"},
+  {:vega_lite, "~> 0.1.8"},
+  {:kino_vega_lite, "~> 0.1.10"}
+])
+```
+
+## Speaking the Language of Data
+
+Linear algebra is the _language of data_
+
+The power of `Nx` tensors and `Nx` operations build on existing theory and operations in Linear Algebra
+
+Deep Learning especially leans on the power of Linear Algebra
+
+```elixir
+Nx.default_backend(EXLA.Backend)
+```
+
+#### The Building Blocks of Linear Algebra
+
+The fundamental object in Linear Algebra is the _vector_
+
+Another object in Linear Algebra is the _scalar_, which are just numbers
+
+```elixir
+vect = Nx.tensor([1.0, 2.0, 3.0], type: :f32)
+```
+
+```elixir
+scalar = Nx.tensor(3.0, type: :f32)
+```
+
+#### Important Operations in Linear Algebra
+
+<!-- livebook:{"break_markdown":true} -->
+
+__Vector Addition__
+
+```elixir
+sales_day1 = Nx.tensor([32, 10, 14])
+sales_day2 = Nx.tensor([43, 23, 76])
+```
+
+```elixir
+total_sales = Nx.add(sales_day1, sales_day2)
+```
+
+__Scalar Multiplication__
+
+```elixir
+keep_rate = 0.9
+unreturned_sales = Nx.multiply(keep_rate, total_sales)
+```
+
+```elixir
+price_per_product = Nx.tensor([9.95, 10.95, 5.99])
+revenue_per_product = Nx.multiply(unreturned_sales, price_per_product)
+```
+
+__Transpose__
+
+The _transpose_ of a matrix is a matrix that's flipped along its diagonal, where the rows and columns of the matrix are swapped
+
+Imagine some sales data is encoded into a matrix. Each row represents a day of sales while each column represents a sales data for a given product. To flip this relationship, such that each column represents a day of sales and each row represents a product:
+
+```elixir
+sales_matrix =
+  Nx.tensor([
+    [32, 10, 14],
+    [43, 23, 76]
+  ])
+  |> Nx.transpose()
+```
+
+__Linear Transformations__
+
+A linear transformation, also known as a linear map, is a function that maps inputs to outputs
+
+Linear transformations are special because they preserve linearity meaning they produce a different representation of an input, while still preserving it's fundamental properties. This is useful when a different or more convenient representation of the input is required
+
+<!-- livebook:{"break_markdown":true} -->
+
+Given an image, the colors can be invereted as follows
+
+```elixir
+image = "/Users/charlie/github.com/charlieroth/machine-learning-in-elixir/files/IMG_0061.jpeg"
+```
+
+```elixir
+image
+|> StbImage.read_file!()
+|> StbImage.resize(512, 512)
+|> StbImage.to_nx()
+|> Nx.as_type({:u, 8})
+|> Kino.Image.new()
+```
+
+```elixir
+invert_color_channels =
+  Nx.tensor([
+    [-1, 0, 0],
+    [0, -1, 0],
+    [0, 0, -1]
+  ])
+```
+
+```elixir
+image
+|> StbImage.read_file!()
+|> StbImage.resize(512, 512)
+|> StbImage.to_nx()
+|> Nx.dot(invert_color_channels)
+|> Nx.as_type({:u, 8})
+|> Kino.Image.new()
+```
