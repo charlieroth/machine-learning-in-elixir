@@ -1,0 +1,462 @@
+<!-- livebook:{"persist_outputs":true} -->
+
+# Chapter 1: Make Machines That Learn
+
+```elixir
+Mix.install([
+  {:axon, "~> 0.6.1"},
+  {:nx, "~> 0.7.2"},
+  {:explorer, "~> 0.8.2"},
+  {:kino, "~> 0.12.3"},
+  {:kino_explorer, "~> 0.1.19"}
+])
+```
+
+## Setup
+
+```elixir
+alias Explorer.DataFrame, as: DF
+alias Explorer.Series
+require Explorer.DataFrame
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+Explorer.DataFrame
+```
+
+## Working with Data
+
+```elixir
+iris = Explorer.Datasets.iris()
+```
+
+<!-- livebook:{"output":true} -->
+
+```text
+#Explorer.DataFrame<
+  Polars[150 x 5]
+  sepal_length f64 [5.1, 4.9, 4.7, 4.6, 5.0, ...]
+  sepal_width f64 [3.5, 3.0, 3.2, 3.1, 3.6, ...]
+  petal_length f64 [1.4, 1.4, 1.3, 1.5, 1.4, ...]
+  petal_width f64 [0.2, 0.2, 0.2, 0.2, 0.2, ...]
+  species string ["Iris-setosa", "Iris-setosa", "Iris-setosa", "Iris-setosa", "Iris-setosa", ...]
+>
+```
+
+### Preparing the Data for Training
+
+Most ML algorithms rely on some linear algebra and probability so you need to get your data into a format that is conducive for learning.
+
+A common requirement is that data should be *normalized*. In ML, this is the process of ensuring that input features operate on a common scale.
+
+There are a few ways to appropriately scale data:
+
+* *Squeezing* values of a feature between 0 and 1
+* Computing a *z-score* is a statistical measure representing a datapoint's deviation from the average data point in a feature space
+
+This type of scaling is commonly referred to as *standardization*
+
+---
+
+Notice below how the `species` column is not being standardized. The `species` feature is known as a *categorical* feature, so there's no notion of scale. A categorical feature is a feature that takes on one of a number of fixed values
+
+```elixir
+cols = ~w(sepal_width sepal_length petal_length petal_width)
+
+normalized_iris =
+  DF.mutate(
+    iris,
+    for col <- across(^cols) do
+      {col.name, (col - mean(col)) / variance(col)}
+    end
+  )
+```
+
+<!-- livebook:{"output":true} -->
+
+```text
+#Explorer.DataFrame<
+  Polars[150 x 5]
+  sepal_length f64 [-1.0840606189132322, -1.3757361217598405, -1.66741162460645, -1.8132493760297554, -1.2298983703365363, ...]
+  sepal_width f64 [2.3722896125315045, -0.28722789030650403, 0.7765791108287005, 0.2446756102610982, 2.9041931130991068, ...]
+  petal_length f64 [-0.7576391687443839, -0.7576391687443839, -0.7897606710936369, -0.7255176663951307, -0.7576391687443839, ...]
+  petal_width f64 [-1.7147014356654708, -1.7147014356654708, -1.7147014356654708, -1.7147014356654708, -1.7147014356654708, ...]
+  species string ["Iris-setosa", "Iris-setosa", "Iris-setosa", "Iris-setosa", "Iris-setosa", ...]
+>
+```
+
+To convert the `species` column to a categorical feature, `Series.cast/2` can be used to tell the `DataFrame` structure how to handle the column values when converted to a tensor
+
+```elixir
+normalized_iris =
+  DF.mutate(
+    normalized_iris,
+    species: Series.cast(species, :category)
+  )
+```
+
+<!-- livebook:{"output":true} -->
+
+```text
+#Explorer.DataFrame<
+  Polars[150 x 5]
+  sepal_length f64 [-1.0840606189132322, -1.3757361217598405, -1.66741162460645, -1.8132493760297554, -1.2298983703365363, ...]
+  sepal_width f64 [2.3722896125315045, -0.28722789030650403, 0.7765791108287005, 0.2446756102610982, 2.9041931130991068, ...]
+  petal_length f64 [-0.7576391687443839, -0.7576391687443839, -0.7897606710936369, -0.7255176663951307, -0.7576391687443839, ...]
+  petal_width f64 [-1.7147014356654708, -1.7147014356654708, -1.7147014356654708, -1.7147014356654708, -1.7147014356654708, ...]
+  species category ["Iris-setosa", "Iris-setosa", "Iris-setosa", "Iris-setosa", "Iris-setosa", ...]
+>
+```
+
+Up to this point the `iris` dataset is ordered by flower species. To simulate a real-world environment, shuffling the data should be done. This is necessary because the ordering of data can sometimes impact the learning of a model.
+
+```elixir
+shuffled_normalized_iris = DF.shuffle(normalized_iris)
+```
+
+<!-- livebook:{"output":true} -->
+
+```text
+#Explorer.DataFrame<
+  Polars[150 x 5]
+  sepal_length f64 [0.22847914389651006, -1.0840606189132322, -0.5007096132200132, 0.37431689531981416, 1.5410189067062523, ...]
+  sepal_width f64 [-1.8829383920093083, 2.3722896125315045, -3.4786488937121147, -1.3510348914417085, 0.2446756102610982, ...]
+  petal_length f64 [0.43085641817798215, -0.7576391687443839, -0.01884461471156162, 0.30237040878096977, 0.43085641817798215, ...]
+  petal_width f64 [0.6890856236786471, -1.5430023599980338, -0.341108830325975, 0.0022893210088989076, 1.8909791533507054, ...]
+  species category ["Iris-versicolor", "Iris-setosa", "Iris-versicolor", "Iris-versicolor", "Iris-virginica", ...]
+>
+```
+
+#### Splitting into Train and Test Sets
+
+A common practice to validate a model's performance is to use a test or *holdout* set. This dataset is usually a small percentage of the original dataset, which the model does not see during training. The performance on the test dataset after training tells you how well the model is performing at it's prediction task.
+
+```elixir
+train_df = DF.slice(shuffled_normalized_iris, 0..119)
+test_df = DF.slice(shuffled_normalized_iris, 120..149)
+```
+
+<!-- livebook:{"output":true} -->
+
+```text
+#Explorer.DataFrame<
+  Polars[30 x 5]
+  sepal_length f64 [2.707720918092689, 1.5410189067062523, -0.7923851160666227, 0.9576679010130332, -0.9382228674899268, ...]
+  sepal_width f64 [3.968000114234309, 0.2446756102610982, 3.436096613666709, -0.28722789030650403, 5.563710615937113, ...]
+  petal_length f64 [0.9448004557660326, 0.5272209252257418, -0.7255176663951307, 0.6557069346227542, -0.7255176663951307, ...]
+  petal_width f64 [1.719280077683269, 1.547581002015832, -1.7147014356654708, 1.719280077683269, -1.8864005113329076, ...]
+  species category ["Iris-virginica", "Iris-virginica", "Iris-setosa", "Iris-virginica", "Iris-setosa", ...]
+>
+```
+
+#### Preparing Data for Training
+
+Before training and testing a model, you will usually need to format the data into a shape the model will understand. Additionally, when passing a `%DataFrame{}` to `Nx` you need to make sure your data is in one of the supported `Nx` input types.
+
+One common way to encode data that can be interpretted easily by a model is with *one-hot encoding*. This is the process of converting a value to either a `0` or a `1`, indicating whether the feature is "on" or "off".
+
+```elixir
+feature_columns = [
+  "sepal_length",
+  "sepal_width",
+  "petal_length",
+  "petal_width"
+]
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+["sepal_length", "sepal_width", "petal_length", "petal_width"]
+```
+
+It is common to use the variable `x` to indicate model features.
+
+Use `Nx.stack/2` to convert the features in the `%DataFrame{}` into a tensor. This will stack the rows of the `%DataFrame{}` into individual entries.
+
+```elixir
+x_train = Nx.stack(train_df[feature_columns], axis: -1)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+#Nx.Tensor<
+  f64[120][4]
+  [
+    [0.22847914389651006, -1.8829383920093083, 0.43085641817798215, 0.6890856236786471],
+    [-1.0840606189132322, 2.3722896125315045, -0.7576391687443839, -1.5430023599980338],
+    [-0.5007096132200132, -3.4786488937121147, -0.01884461471156162, -0.341108830325975],
+    [0.37431689531981416, -1.3510348914417085, 0.30237040878096977, 0.0022893210088989076],
+    [1.5410189067062523, 0.2446756102610982, 0.43085641817798215, 1.8909791533507054],
+    [-1.3757361217598405, -0.28722789030650403, -0.7576391687443839, -1.7147014356654708],
+    [-0.35487186179670904, -0.8191313908741062, -0.05096611706081479, 0.17398839667633603],
+    [0.22847914389651006, -0.28722789030650403, 0.3344919111302228, 1.032483775013521],
+    [0.6659923981664237, 1.3084826113963002, 0.7199499393212605, 2.2343773046855797],
+    [-0.6465473646433173, 3.436096613666709, -0.7255176663951307, -1.7147014356654708],
+    [1.5410189067062523, 0.2446756102610982, 0.3666134134794761, 0.51738654801121],
+    [0.08264139247320593, 0.7765791108287005, 0.3344919111302228, 1.032483775013521],
+    [0.8118301495897291, -0.8191313908741062, ...],
+    ...
+  ]
+>
+```
+
+Extract a labels tensor by one-hot encdoing the `species` column. This is done by converting the `species` column to a tensor, which implicitly casts each category to a unique integer and then using `Nx.equal/2` to do the one-hot encoding.
+
+```elixir
+y_train =
+  train_df["species"]
+  |> Nx.stack(axis: -1)
+  |> Nx.equal(Nx.iota({1, 3}, axis: -1))
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+#Nx.Tensor<
+  u8[120][3]
+  [
+    [0, 1, 0],
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+    [0, 0, 1],
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 1, 0],
+    [0, 1, 0],
+    [1, 0, 0],
+    [0, 1, 0],
+    [1, 0, 0],
+    [0, 1, ...],
+    ...
+  ]
+>
+```
+
+```elixir
+x_test = Nx.stack(test_df[feature_columns], axis: -1)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+#Nx.Tensor<
+  f64[30][4]
+  [
+    [2.707720918092689, 3.968000114234309, 0.9448004557660326, 1.719280077683269],
+    [1.5410189067062523, 0.2446756102610982, 0.5272209252257418, 1.547581002015832],
+    [-0.7923851160666227, 3.436096613666709, -0.7255176663951307, -1.7147014356654708],
+    [0.9576679010130332, -0.28722789030650403, 0.6557069346227542, 1.719280077683269],
+    [-0.9382228674899268, 5.563710615937113, -0.7255176663951307, -1.8864005113329076],
+    [0.6659923981664237, 1.3084826113963002, 0.30237040878096977, 0.6890856236786471],
+    [0.5201546467431196, 1.8403861119639024, 0.5272209252257418, 1.8909791533507054],
+    [0.6659923981664237, 1.8403861119639024, 0.5914639299242479, 2.0626782290181427],
+    [-1.66741162460645, 0.7765791108287005, -0.6933961640458776, -1.7147014356654708],
+    [1.5410189067062523, 0.7765791108287005, 0.6235854322735012, 1.8909791533507054],
+    [0.8118301495897291, 0.7765791108287005, 0.4950994228764885, 1.8909791533507054],
+    [-0.6465473646433173, -0.28722789030650403, 0.23812740408246344, 0.51738654801121],
+    [-0.5007096132200132, -2.946745393144513, ...],
+    ...
+  ]
+>
+```
+
+```elixir
+y_test =
+  test_df["species"]
+  |> Nx.stack(axis: -1)
+  |> Nx.equal(Nx.iota({1, 3}, axis: -1))
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+#Nx.Tensor<
+  u8[30][3]
+  [
+    [0, 0, 1],
+    [0, 0, 1],
+    [1, 0, 0],
+    [0, 0, 1],
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+    [0, 0, 1],
+    [1, 0, 0],
+    [0, 0, 1],
+    [0, 0, 1],
+    [0, 1, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 1, ...],
+    ...
+  ]
+>
+```
+
+## Multinomial Logistic Regression with Axon
+
+Training a ML model in Axon can be summarize into three steps:
+
+1. Define the model
+2. Create an input pipeline
+3. Declare and run the training loop
+
+<!-- livebook:{"break_markdown":true} -->
+
+### Defining the Model
+
+An ML model can be thought of as a function, takes data in and gives a value out. `Axon` includes a model creaition API that is typically used for creating neural networks. It can also be used, in our case, to create a basic multinomial logistic regression model
+
+```elixir
+model =
+  Axon.input("iris_features", shape: {nil, 4})
+  |> Axon.dense(3, activation: :softmax)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+#Axon<
+  inputs: %{"iris_features" => {nil, 4}}
+  outputs: "softmax_0"
+  nodes: 3
+>
+```
+
+Visualizing smaller models is a useful way to debug and understand how data flows through your models.
+
+```elixir
+Axon.Display.as_graph(model, Nx.template({1, 4}, :f32))
+```
+
+<!-- livebook:{"output":true} -->
+
+```mermaid
+graph TD;
+11[/"iris_features (:input) {1, 4}"/];
+12["dense_0 (:dense) {1, 3}"];
+13["softmax_0 (:softmax) {1, 3}"];
+12 --> 13;
+11 --> 12;
+```
+
+### Declaring the Input Pipeline
+
+`Axon` implements minibatch training with gradient descent. This means that Axon's training API performs updates to the model iteratively. The trainging API expects to step through a dataset in "batches" or smaller groups of examples. The construction and feeding of batches can be done with the `Stream` module.
+
+---
+
+Below this stream repeatedly returns tuples of the train features and train targets. `Axon` expects input data to be in pairs of `{features, targets}`.
+
+```elixir
+data_stream =
+  Stream.repeatedly(fn ->
+    {x_train, y_train}
+  end)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+#Function<51.53678557/2 in Stream.repeatedly/1>
+```
+
+### Running the Training Loop
+
+The `Axon.Loop` API is the primary API for training models with gradient descent. A training loop is the process of:
+
+1. Grabbing input from the input pipeline
+2. Making predictions from inputs
+3. Determining how good the predictions were
+4. Updating the model based on prediction goodness
+5. Repeat
+
+In practice an `Axon` training loop is a data structure which tells `Axon` things about the loop such as: initializing the loop, how to update the model state after every iteration, what metrics to track during the loop.
+
+```elixir
+trained_model_state =
+  model
+  |> Axon.Loop.trainer(:categorical_cross_entropy, :sgd)
+  |> Axon.Loop.metric(:accuracy)
+  |> Axon.Loop.run(data_stream, %{}, iterations: 500, epochs: 10)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+Epoch: 0, Batch: 450, accuracy: 0.8766780 loss: 0.3948236
+Epoch: 1, Batch: 450, accuracy: 0.9137819 loss: 0.3486299
+Epoch: 2, Batch: 450, accuracy: 0.9290976 loss: 0.3208569
+Epoch: 3, Batch: 450, accuracy: 0.9401752 loss: 0.3004671
+Epoch: 4, Batch: 450, accuracy: 0.9499477 loss: 0.2842984
+Epoch: 5, Batch: 450, accuracy: 0.9647095 loss: 0.2709425
+Epoch: 6, Batch: 450, accuracy: 0.9666680 loss: 0.2596202
+Epoch: 7, Batch: 450, accuracy: 0.9666680 loss: 0.2498431
+Epoch: 8, Batch: 450, accuracy: 0.9666680 loss: 0.2412809
+Epoch: 9, Batch: 450, accuracy: 0.9666680 loss: 0.2336971
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+%{
+  "dense_0" => %{
+    "bias" => #Nx.Tensor<
+      f32[3]
+      [-0.3324267566204071, 1.401785135269165, -1.0693587064743042]
+    >,
+    "kernel" => #Nx.Tensor<
+      f32[4][3]
+      [
+        [-1.5182428359985352, -0.3163832426071167, -0.12912799417972565],
+        [0.22710560262203217, -0.6790318489074707, -0.702092170715332],
+        [-1.3980246782302856, 0.3253732919692993, 0.35016053915023804],
+        [-2.0246469974517822, -0.6296343803405762, 2.626643419265747]
+      ]
+    >
+  }
+}
+```
+
+## Evaluating the Trained Model
+
+To prove the mode's efficacy it needs to be evaluated on the test dataset set aside before hand. `Axon` has conveniences for evaluating models.
+
+```elixir
+data = [{x_test, y_test}]
+
+model
+|> Axon.Loop.evaluator()
+|> Axon.Loop.metric(:accuracy)
+|> Axon.Loop.run(data, trained_model_state)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+Batch: 0, accuracy: 0.9666666
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+%{
+  0 => %{
+    "accuracy" => #Nx.Tensor<
+      f32
+      0.9666666388511658
+    >
+  }
+}
+```
